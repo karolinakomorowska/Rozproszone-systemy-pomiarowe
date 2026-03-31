@@ -216,3 +216,48 @@ W aktualnej fazie laboratoryjnej urządzenie ESP32 wysyła mieszankę danych rze
 * **Temperatura (`temperature`)** – rzeczywisty odczyt temperatury rdzenia ESP32 (otrzymane wartości są rzędu 40-50°C). Jednostka: `C`.
 * **Azymut (`azimuth`)** – dane symulowane matematycznie (funkcja sinus). Wartości płynnie falują w zakresie od 170.0 do 190.0 ze stałym okresem wynoszącym 60 sekund. Jednostka: `deg`.
 ![Wykres falującego azymutu w MQTT Explorerze](img\screen.png)
+
+
+## Lab05
+
+# Dokumentacja usługi Ingestor
+
+## 1. Cel i opis usługi
+Usługa **Ingestor** jest kluczowym elementem systemu zbierania danych pomiarowych. Działa jako pośrednik (subscriber) w architekturze MQTT, którego zadaniem jest:
+* Nasłuchiwanie na wiadomości przesyłane do brokera na temacie `lab/+/+/+`.
+* Parsowanie danych z formatu JSON.
+* Weryfikacja poprawności otrzymanych danych (walidacja pól `device_id`, `sensor`, `value`, `ts_ms`).
+* Trwałe zapisywanie pomiarów w relacyjnej bazie danych **PostgreSQL**.
+
+
+
+## 2. Model Danych (PostgreSQL)
+Dane przechowywane są w tabeli `measurements` w bazie `abcd_db`. Tabela została zaprojektowana tak, aby przechowywać zarówno surowe dane z czujników, jak i metadane dotyczące czasu odebrania pakietu.
+
+### Struktura tabeli SQL:
+```sql
+CREATE TABLE IF NOT EXISTS measurements (
+    id SERIAL PRIMARY KEY,
+    group_id TEXT,
+    device_id TEXT NOT NULL,
+    sensor TEXT NOT NULL,
+    value DOUBLE PRECISION NOT NULL,
+    unit TEXT,
+    ts_ms BIGINT NOT NULL,
+    seq INTEGER,
+    topic TEXT,
+    received_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+### 3. Konfiguracja środowiska 
+Usługa została skonteneryzowana przy użyciu Docker. Kluczowe parametry połączenia zdefiniowane w usłudze:
+| Zmienna | Wartość |
+| :--- | :--- |
+| **MQTT_HOST** | `broker` |
+| **DB_HOST** | `database` |
+| **DB_NAME** | `abcd_db` |
+| **DB_USER** | `admin` |
+| **DB_PASSWORD** | `admin_pass1234` |
+
+
