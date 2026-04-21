@@ -4,7 +4,8 @@ from db import get_db_connection
 from db import SessionLocal
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
-from models import Sample
+from models import Sample, make_response
+from http import HTTPStatus
 
 
 
@@ -27,10 +28,9 @@ def get_measurements():
                                      ).all()
     except SQLAlchemyError as e:
         print(e)
+        return "Bład", HTTPStatus.INTERNAL_SERVER_ERROR
 
-    response = [x.to_dict() for x in rows]
-
-    return jsonify(response)
+    return jsonify(make_response(rows)), HTTPStatus.OK
 
 # 3. Endpoint /measurements/latest (wymagany - zwraca tylko najnowszy wynik)
 @app.route("/measurements/latest")

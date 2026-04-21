@@ -30,3 +30,7 @@ class Sample(Base):
             "topic": self.topic,
             "received_at": self.received_at.isoformat() if self.received_at else None
         }
+    
+
+def make_response(list_of_Samples):
+        return [x.to_dict() for x in list_of_Samples]
