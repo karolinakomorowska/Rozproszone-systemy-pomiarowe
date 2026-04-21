@@ -1,10 +1,77 @@
-from flask import Flask
+from flask import Flask, jsonify, request
+from psycopg2.extras import RealDictCursor
+from db import get_db_connection
+from db import SessionLocal
+from sqlalchemy import select
+from sqlalchemy.exc import SQLAlchemyError
+from models import Sample
+
+
 
 app = Flask(__name__)
 
-@app.route("/")
-def hello_world():
-    return "<p>Hello, World!</p>"
+# 1. Endpoint /health (wymagany)
+@app.route("/health")
+def health_check():
+    return jsonify({"status": "healthy"})
+
+# 2. Endpoint /measurements (zwraca ogólną listę)
+# http://localhost:5001/measurements?limit=20
+@app.route("/measurements")
+def get_measurements():
+    limit_val = request.args.get("limit", 20, type=int)
+    try:    
+        with SessionLocal() as db:
+            rows = db.scalars(select(Sample)
+                                     .limit(limit_val)
+                                     ).all()
+    except SQLAlchemyError as e:
+        print(e)
+
+    response = [x.to_dict() for x in rows]
+
+    return jsonify(response)
+
+# 3. Endpoint /measurements/latest (wymagany - zwraca tylko najnowszy wynik)
+@app.route("/measurements/latest")
+def get_latest():
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+    # LIMIT 1 oznacza, że bierzemy tylko pierwszy od góry wynik
+    cur.execute("SELECT * FROM measurements ORDER BY ts_ms DESC LIMIT 1;")
+    pomiar = cur.fetchone() # fetchone() zamiast fetchall() bo to tylko jeden rekord
+    cur.close()
+    conn.close()
+    return jsonify(pomiar)
+
+@app.route("/health")
+def health():
+    return jsonify({"status": "ok"})
+
+# 4. Endpoint /measurements/history (wymagany - filtrowanie i dodawanie pól)
+@app.route("/measurements/history")
+def get_history():
+    # To są te "dodawane pola"! Odbieramy parametry z adresu URL.
+    # Np. uzytkownik wpisze: /measurements/history?sensor=temperature&limit=5
+    sensor_type = request.args.get('sensor')
+    limit = request.args.get('limit', 10, type=int) # domyślnie 10, jeśli ktoś nie poda
+    
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+    
+    if sensor_type:
+        # Jeśli ktoś podał sensor, filtrujemy wyniki (WHERE sensor = ...)
+        cur.execute("SELECT * FROM measurements WHERE sensor = %s ORDER BY ts_ms DESC LIMIT %s;", (sensor_type, limit))
+    else:
+        # Jeśli nie, dajemy wszystko
+        cur.execute("SELECT * FROM measurements ORDER BY ts_ms DESC LIMIT %s;", (limit,))
+        
+    pomiary = cur.fetchall()
+    cur.close()
+    conn.close()
+    return jsonify(pomiary)
+
+
 
 if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0', port=5001)
+    app.run(debug=True, host='0.0.0.0', port=5002)
