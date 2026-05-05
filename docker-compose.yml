@@ -26,10 +26,11 @@ services:
       - broker
       - database
 
-  api:
-    build: ./api
-    container_name: measurements-api
+  flask:
+    build: 
+      context: ./api
+      dockerfile: Dockerfile
     ports:
       - "5001:5001"
-    depends_on:
-      - database
+    image: api:v1
+    container_name: api

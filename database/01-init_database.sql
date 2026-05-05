@@ -22,4 +22,14 @@ topic TEXT,
 received_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+INSERT INTO measurements
+	(group_id,device_id,sensor,value,unit,ts_ms,seq,topic)
+	VALUES ('g03', 'esp32-abcd01','temperature', 21.5, 'C', 1742030400000, 15, 'lab/g03/esp32-abcd01/temperature');
 
+INSERT INTO measurements
+	(group_id,device_id,sensor,value,unit,ts_ms,seq,topic)
+	VALUES ('g03', 'esp32-abcd02','humidity', 55, '%', 1742030440000, 16, 'lab/g03/esp32-abcd02/humidity');    
+
+INSERT INTO measurements
+	(group_id,device_id,sensor,value,unit,ts_ms,seq,topic)
+	VALUES ('g03', 'esp32-abcd03','pressure', 991.5, 'hPa', 1742030460000, 17, 'lab/g03/esp32-abcd01/pressure');  
