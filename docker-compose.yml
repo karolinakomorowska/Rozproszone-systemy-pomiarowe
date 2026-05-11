@@ -25,3 +25,13 @@ services:
     depends_on:
     - broker
     - database
+
+  api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    ports:
+      - "5001:5000"
+    container_name: api
+    depends_on:
+      - database
