@@ -23,14 +23,5 @@ services:
       dockerfile: Dockerfile
     container_name: ingestor
     depends_on:
-      - broker
-      - database
-
-  flask:
-    build: 
-      context: ./api
-      dockerfile: Dockerfile
-    ports:
-      - "5001:5001"
-    image: api:v1
-    container_name: api
+    - broker
+    - database

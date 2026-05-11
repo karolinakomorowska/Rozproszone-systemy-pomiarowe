@@ -1,77 +1,161 @@
-from flask import Flask, jsonify, request
-from psycopg2.extras import RealDictCursor
-from db import get_db_connection
-from db import SessionLocal
-from sqlalchemy import select
-from sqlalchemy.exc import SQLAlchemyError
-from models import Sample, make_response
-from http import HTTPStatus
-
-
+from flask import Flask, jsonify, request 
+from models import measurement_to_dict
+from db import get_connection
 
 app = Flask(__name__)
 
-# 1. Endpoint /health (wymagany)
-@app.route("/health")
-def health_check():
-    return jsonify({"status": "healthy"})
+@app.route("/")
+def hello_world():
+    return "<p>Hello World!</p>"
 
-# 2. Endpoint /measurements (zwraca ogólną listę)
-# http://localhost:5001/measurements?limit=20
-@app.route("/measurements")
-def get_measurements():
-    limit_val = request.args.get("limit", 20, type=int)
-    try:    
-        with SessionLocal() as db:
-            rows = db.scalars(select(Sample)
-                                     .limit(limit_val)
-                                     ).all()
-    except SQLAlchemyError as e:
-        print(e)
-        return "Bład", HTTPStatus.INTERNAL_SERVER_ERROR
-
-    return jsonify(make_response(rows)), HTTPStatus.OK
-
-# 3. Endpoint /measurements/latest (wymagany - zwraca tylko najnowszy wynik)
-@app.route("/measurements/latest")
-def get_latest():
-    conn = get_db_connection()
-    cur = conn.cursor(cursor_factory=RealDictCursor)
-    # LIMIT 1 oznacza, że bierzemy tylko pierwszy od góry wynik
-    cur.execute("SELECT * FROM measurements ORDER BY ts_ms DESC LIMIT 1;")
-    pomiar = cur.fetchone() # fetchone() zamiast fetchall() bo to tylko jeden rekord
-    cur.close()
-    conn.close()
-    return jsonify(pomiar)
-
-@app.route("/health")
+# 1. Sprawdzenie stanu aplikacji
+@app.route("/health", methods=["GET"])
 def health():
     return jsonify({"status": "ok"})
 
-# 4. Endpoint /measurements/history (wymagany - filtrowanie i dodawanie pól)
-@app.route("/measurements/history")
-def get_history():
-    # To są te "dodawane pola"! Odbieramy parametry z adresu URL.
-    # Np. uzytkownik wpisze: /measurements/history?sensor=temperature&limit=5
-    sensor_type = request.args.get('sensor')
-    limit = request.args.get('limit', 10, type=int) # domyślnie 10, jeśli ktoś nie poda
-    
-    conn = get_db_connection()
-    cur = conn.cursor(cursor_factory=RealDictCursor)
-    
-    if sensor_type:
-        # Jeśli ktoś podał sensor, filtrujemy wyniki (WHERE sensor = ...)
-        cur.execute("SELECT * FROM measurements WHERE sensor = %s ORDER BY ts_ms DESC LIMIT %s;", (sensor_type, limit))
-    else:
-        # Jeśli nie, dajemy wszystko
-        cur.execute("SELECT * FROM measurements ORDER BY ts_ms DESC LIMIT %s;", (limit,))
+# 2. Pobranie 20 ostatnich pomiarów
+@app.route("/measurements", methods=["GET"])
+def get_measurements():
+    try:
+        conn = get_connection()
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT id, group_id, device_id, sensor, value, unit, ts_ms, seq, topic
+            FROM measurements
+            ORDER BY id DESC
+            LIMIT 20
+        """)
+        rows = cur.fetchall()
+        cur.close()
+        conn.close()
+
+        result = [measurement_to_dict(row) for row in rows]
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# 3. Pobranie najnowszego pomiaru
+@app.route("/measurements/latest", methods=["GET"])
+def get_latest_measurement():
+    try:
+        conn = get_connection()
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT id, group_id, device_id, sensor, value, unit, ts_ms, seq, topic
+            FROM measurements
+            ORDER BY id DESC
+            LIMIT 1
+        """)
+        row = cur.fetchone()
+        cur.close()
+        conn.close()
+
+        if row is None:
+            return jsonify({"message": "Brak danych"}), 404
+
+        return jsonify(measurement_to_dict(row))
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# 4. Historia z filtrowaniem
+@app.route("/measurements/history", methods=["GET"])
+def get_measurement_history():
+    try:
+        device_id = request.args.get("device_id")
+        group_id = request.args.get("group_id")
+        sensor = request.args.get("sensor")
+        limit = request.args.get("limit", default=20, type=int)
+
+        conn = get_connection()
+        cur = conn.cursor()
         
-    pomiary = cur.fetchall()
-    cur.close()
-    conn.close()
-    return jsonify(pomiary)
+        # SQL z "WHERE 1=1" pozwala na łatwe dodawanie kolejnych filtrów
+        query = """
+            SELECT id, group_id, device_id, sensor, value, unit, ts_ms, seq, topic
+            FROM measurements
+            WHERE 1=1
+        """
+        params = []
 
+        if device_id:
+            query += " AND device_id = %s"
+            params.append(device_id)
 
+        if group_id:
+            query += " AND group_id = %s"
+            params.append(group_id)
+
+        if sensor:
+            query += " AND sensor = %s"
+            params.append(sensor)
+
+        query += " ORDER BY id DESC LIMIT %s"
+        params.append(limit)
+
+        cur.execute(query, params)
+        rows = cur.fetchall()
+        cur.close()
+        conn.close()
+
+        result = [measurement_to_dict(row) for row in rows]
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    
+
+# 5. Dostępne urządzenia
+@app.route("/devices", methods=["GET"])
+def get_devices_list():
+    try:
+        conn = get_connection()
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT DISTINCT device_id
+            FROM measurements
+            WHERE device_id IS NOT NULL
+            ORDER BY device_id
+        """)
+        rows = cur.fetchall()
+        cur.close()
+        conn.close()
+
+        result = [row[0] for row in rows]
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    
+# 6. Dostępne czujniki
+@app.route("/sensors", methods=["GET"])
+def get_sensors_list():
+    try:
+        device_id = request.args.get("device_id")
+        conn = get_connection()
+        cur = conn.cursor()
+
+        query = """
+            SELECT DISTINCT device_id, sensor
+            FROM measurements
+            WHERE 1=1
+        """
+
+        params = []
+
+        if device_id:
+            query += " AND device_id = %s"
+            params.append(device_id)
+
+        query += " ORDER BY device_id"
+
+        cur.execute(query, params)
+        rows = cur.fetchall()
+        cur.close()
+        conn.close()
+
+        result = [{"device_id": row[0], "sensor": row[1]} for row in rows]
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5002)
