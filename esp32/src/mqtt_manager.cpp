@@ -1,83 +1,56 @@
-#include "mqtt_manager.h"
+#include <Arduino.h>
+#include <WiFi.h>
+#include <PubSubClient.h>
 #include "secrets.h"
 
-#define SCHEMA_VERSION 2
+WiFiClient espClient;
+PubSubClient mqttClient(espClient);
 
-mqtt_manager::mqtt_manager(WiFiClient& espClient) : mqttClient(espClient) {}
+unsigned long lastMqttAttemptMs = 0;
+const unsigned long MQTT_RETRY_MS = 3000;
+String deviceId = "esp32-test";
 
-void mqtt_manager::begin(const String& deviceID, const String& deviceTopic)
-{
-  mainTopic = deviceTopic;
-  deviceId = deviceID;
-  seq_data_counter = 0;
-  seq_status_counter = 0;
+String statusTopic() {
+  return "lab/" + String(MQTT_GROUP) + "/" + deviceId + "/status";
 }
 
-void mqtt_manager::connectMQTT()
-{
-  mqttClient.setServer(MQTT_HOST, MQTT_PORT);
-
-  while (!mqttClient.connected())
-  {
-    Serial.print("Laczenie z MQTT...");
-    if (mqttClient.connect(deviceId.c_str()))
-    {
-      Serial.println("OK");
-    }
-    else
-    {
-      Serial.print("blad, rc=");
-      Serial.print(mqttClient.state());
-      Serial.println(" - ponowna proba za 2 s");
-      delay(2000);
-    }
+bool connectMqttIfNeeded() {
+  // 1. Sprawdzenie Wi-Fi
+  if (WiFi.status() != WL_CONNECTED) {
+    return false;
   }
-}
+  // 2. Sprawdzenie czy już połączono
+  if (mqttClient.connected()) {
+    return true;
+  }
+  // 3. Stoper prób połączenia
+  if (millis() - lastMqttAttemptMs < MQTT_RETRY_MS) {
+    return false;
+  }
+  lastMqttAttemptMs = millis();
 
-void mqtt_manager::publishMeasurement(const String &sensor, float value, const String &unit, long long ts_ms)
-{
-  JsonDocument doc;
-  doc["schema_version"] = SCHEMA_VERSION;
-  doc["group_id"] = MQTT_GROUP;
-  doc["device_id"] = deviceId;
-  doc["sensor"] = sensor;
-  doc["value"] = value;
-  doc["unit"] = unit;
-  doc["ts_ms"] = ts_ms;
-  doc["seq"] = seq_data_counter++;
-  doc["type"] = "meas";
+  // 4. Konfiguracja Last Will
+  String willPayload = "{\"device_id\":\"" + deviceId + "\",\"status\":\"offline\"}";
+  
+  // 5. Próba połączenia
+  bool ok = mqttClient.connect(
+    deviceId.c_str(),
+    statusTopic().c_str(),
+    0,
+    true,
+    willPayload.c_str()
+  );
 
-  char payload[256];
-  serializeJson(doc, payload);
-
-  String topic;
-  topic = mainTopic + "/" + sensor;
-
-  mqttClient.publish(topic.c_str(), payload);
-  Serial.print("Publikacja na topic: ");
-  Serial.println(topic);
-  Serial.println(payload);
-}
-
-void mqtt_manager::publishStatus(const String &status, long long ts_ms)
-{
-  JsonDocument doc;
-  doc["schema_version"] = SCHEMA_VERSION;
-  doc["group_id"] = MQTT_GROUP;
-  doc["device_id"] = deviceId;
-  doc["status"] = status;
-  doc["ts_ms"] = ts_ms;
-  doc["seq"] = seq_status_counter++;
-  doc["type"] = "status";
-
-  char payload[256];
-  serializeJson(doc, payload);
-
-  String topic;
-  topic = mainTopic + "/" + "status";
-
-  mqttClient.publish(topic.c_str(), payload);
-  Serial.print("Publikacja na topic: ");
-  Serial.println(topic);
-  Serial.println(payload);
+  // 6. Raportowanie stanu
+  if (ok) {
+    Serial.println("MQTT connected");
+    // DODATEK Z INSTRUKCJI: Status online po udanym połączeniu
+    String onlinePayload = "{\"device_id\":\"" + deviceId + "\",\"status\":\"online\"}";
+    mqttClient.publish(statusTopic().c_str(), onlinePayload.c_str(), true);
+  } else {
+    Serial.print("MQTT connect failed, rc=");
+    Serial.println(mqttClient.state());
+  }
+  
+  return ok;
 }
