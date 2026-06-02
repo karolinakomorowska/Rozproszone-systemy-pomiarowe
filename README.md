@@ -261,3 +261,50 @@ Usługa została skonteneryzowana przy użyciu Docker. Kluczowe parametry połą
 | **DB_PASSWORD** | `admin_pass1234` |
 
 
+## Lab10
+Laboratorium 10 - Zabezpieczenie komunikacji w systemie IoT (TLS / MQTT)
+
+**Cel laboratorium:**
+Głównym celem ćwiczenia było wdrożenie mechanizmów bezpieczeństwa w rozproszonym systemie pomiarowym. Obejmowało to implementację szyfrowania TLS dla komunikacji z brokerem MQTT, zabezpieczenie infrastruktury Docker oraz konfigurację mikrokontrolera ESP32 do obsługi bezpiecznych połączeń asymetrycznych.
+
+---
+
+## 1. Generowanie certyfikatów kryptograficznych
+W pierwszym etapie utworzono własny urząd certyfikacji (CA - Certificate Authority) oraz wygenerowano klucze dla serwera (brokera MQTT).
+* Utworzono plik klucza prywatnego CA oraz certyfikat główny (`ca.crt`).
+* Wygenerowano klucz prywatny dla serwera (`server.key`) oraz żądanie podpisania certyfikatu (CSR).
+* Podpisano certyfikat serwera (`server.crt`) przy użyciu klucza CA.
+* Wygenerowane pliki umieszczono w katalogu `certs`, który następnie przeniesiono do kontekstu budowania usługi brokera (folder `/broker`).
+
+## 2. Konfiguracja środowiska (Docker Compose)
+Wprowadzono kluczowe zmiany w pliku `docker-compose.yml` w celu podniesienia bezpieczeństwa całej infrastruktury:
+* **Izolacja bazy danych:** Usunięto publiczne mapowanie portów dla bazy PostgreSQL (`5432:5432`), co uniemożliwia bezpośredni dostęp z zewnątrz.
+* **Bezpieczna sieć:** Skonfigurowano wewnętrzną sieć typu `bridge` (o nazwie `backend`) i przypisano do niej wszystkie kontenery (broker, baze danych, api, ingestor).
+* **Broker MQTT:** Zmieniono konfigurację Mosquitto, zmuszając usługę do używania certyfikatów i nasłuchiwania na bezpiecznym porcie **8883**.
+
+## 3. Testowanie komunikacji po stronie serwera (TLS)
+Aby zweryfikować poprawność konfiguracji szyfrowania, przeprowadzono testy komunikacji wewnętrznej w środowisku WSL:
+* Uruchomiono klienta nasłuchującego (`mosquitto_sub`) na porcie 8883, wymuszając użycie certyfikatu CA poleceniem:
+  `mosquitto_sub -d -h 127.0.0.1 -p 8883 --cafile broker/certs/ca.crt -t "test/topic" --insecure`
+* Z włączonym trybem debugowania (flaga `-d`) zaobserwowano pomyślne nawiązanie tzw. uścisku dłoni (handshake TLS) – otrzymano statusy `CONNACK (0)` oraz `SUBACK`.
+* Przesłano testową wiadomość przy użyciu drugiego terminala (`mosquitto_pub`) oraz programu **MQTT Explorer**. Wiadomość została poprawnie przesłana kanałem szyfrowanym i odebrana przez subskrybenta.
+
+## 4. Przygotowanie konfiguracji klienta (ESP32)
+Aby mikrokontroler mógł komunikować się z zabezpieczonym brokerem, zmodyfikowano jego kod źródłowy:
+* **Synchronizacja czasu (NTP):** Upewniono się, że przed próbą połączenia MQTT wywoływana jest funkcja `synchronizeTime()`. Zsynchronizowanie zegara systemowego ESP32 (do strefy UTC) jest krytyczne, ponieważ bez tego mikrokontroler traktowałby nowy certyfikat jako pochodzący "z przyszłości" (zakładając swój domyślny czas: rok 1970) i odrzucałby połączenie z komunikatem błędu.
+* **Wdrożenie TLS:** W pliku `mqtt_manager.cpp` zastąpiono standardową klasę `WiFiClient` jej bezpiecznym odpowiednikiem – `WiFiClientSecure`.
+* **Certyfikat CA:** Skopiowano zawartość wygenerowanego pliku `ca.crt` wprost do kodu ESP32 i przypisano do bezpiecznego klienta używając metody `espClient.setCACert(ca_cert)`.
+* **Zmiana portu:** W głównym pliku programu zaktualizowano port komunikacyjny serwera na **8883**.
+
+---
+
+## 5. Napotkane problemy i ich rozwiązania
+Podczas konfiguracji napotkano na następujące wyzwania inżynierskie, które pomyślnie rozwiązano:
+1. **Błędy walidacji YAML:** Błąd parsowania `networks additional properties` wynikał ze złego formatowania spacji. Słowo `networks:` musiało znajdować się całkowicie po lewej stronie pliku (na tym samym poziomie co `services:`).
+2. **Błąd wczytywania certyfikatów przez Docker:** Błąd `"certs": not found` przy budowaniu obrazu Mosquitto wynikał z faktu, że folder znajdował się poza kontekstem budowania usługi (`context: ./broker`). Rozwiązaniem było przeniesienie folderu `certs` do katalogu `broker`.
+3. **Problem z publikacją (MQTT Explorer):** Początkowo testowe wiadomości wysyłane z programu nie docierały do terminala, ponieważ omyłkowo publikowano je na zarezerwowany temat systemowy (`$SYS/broker/...`). Zmiana tematu na czyste `test/topic` rozwiązała problem.
+
+## 6. Podsumowanie
+Laboratorium zakończyło się pełnym sukcesem. Architektura systemu na serwerze jest w pełni hermetyczna, usługi komunikują się wewnątrz dedykowanej sieci, a cała komunikacja IoT (od ESP32 do serwera Mosquitto) przesyłana jest asymetrycznym kanałem szyfrowanym zabezpieczonym protokołem TLS.
+![ ](test1.png)
+![ ](test2.png)
