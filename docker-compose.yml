@@ -3,7 +3,7 @@ services:
     build:
       context: ./broker
     ports:
-      - "8883:8883"
+      - "1883:1883"
     container_name: broker
     networks:
       - backend
@@ -35,6 +35,10 @@ services:
       dockerfile: Dockerfile
     ports:
       - "5001:5000"
+    environment:
+      - API_USERNAME=student
+      - API_PASSWORD=student
+
     container_name: api
     depends_on:
       - database
