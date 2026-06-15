@@ -26,6 +26,8 @@
 		<Item Name="TypeDefs" Type="Folder" URL="../TypeDefs">
 			<Property Name="NI.DISK" Type="Bool">true</Property>
 		</Item>
+		<Item Name="rest_get_api.vi" Type="VI" URL="../subVIs/rest_get_api.vi"/>
+		<Item Name="rest_get_history.vi" Type="VI" URL="../subVIs/rest_get_history.vi"/>
 		<Item Name="SM-UI.vi" Type="VI" URL="../SM-UI.vi"/>
 		<Item Name="Dependencies" Type="Dependencies">
 			<Item Name="vi.lib" Type="Folder">

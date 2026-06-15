@@ -1,6 +1,7 @@
 from flask import Flask, jsonify, request 
 from models import measurement_to_dict
 from db import get_connection
+from auth import auth_required
 
 app = Flask(__name__)
 
@@ -15,6 +16,7 @@ def health():
 
 # 2. Pobranie 20 ostatnich pomiarów
 @app.route("/measurements", methods=["GET"])
+@auth_required
 def get_measurements():
     try:
         conn = get_connection()
@@ -36,6 +38,7 @@ def get_measurements():
 
 # 3. Pobranie najnowszego pomiaru
 @app.route("/measurements/latest", methods=["GET"])
+@auth_required
 def get_latest_measurement():
     try:
         conn = get_connection()
@@ -59,6 +62,7 @@ def get_latest_measurement():
 
 # 4. Historia z filtrowaniem
 @app.route("/measurements/history", methods=["GET"])
+@auth_required
 def get_measurement_history():
     try:
         device_id = request.args.get("device_id")
@@ -105,6 +109,7 @@ def get_measurement_history():
 
 # 5. Dostępne urządzenia
 @app.route("/devices", methods=["GET"])
+@auth_required
 def get_devices_list():
     try:
         conn = get_connection()
@@ -126,6 +131,7 @@ def get_devices_list():
     
 # 6. Dostępne czujniki
 @app.route("/sensors", methods=["GET"])
+@auth_required
 def get_sensors_list():
     try:
         device_id = request.args.get("device_id")
