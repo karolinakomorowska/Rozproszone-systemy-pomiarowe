@@ -16,6 +16,7 @@ The system is designed with modularity and containerization in mind. It consists
 * **Database:** PostgreSQL
 * **Backend REST API:** Python, Flask (Basic Auth)
 * **Frontend / Dashboard:** Streamlit, Pandas
+* **Security & Crypto:** TLS/SSL (Custom CA, Server & Client Certificates for MQTT)
 * **Infrastructure:** Docker, Docker Compose
 
 ---
