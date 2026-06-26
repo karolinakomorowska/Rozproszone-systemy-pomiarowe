@@ -2,20 +2,21 @@ services:
   broker:
     build:
       context: ./broker
-      dockerfile: Dockerfile
-    ports: 
+    ports:
       - "1883:1883"
-    image: broker:v1
     container_name: broker
+    networks:
+      - backend
   
   database:
     build:
       context: ./database
       dockerfile: Dockerfile
-    ports:
-      - "5432:5432"
+    # Port 5432 usunięty zgodnie z instrukcją (brak publicznej ekspozycji)
     image: database:v1
     container_name: postgres
+    networks:
+      - backend
 
   ingestor:
     build:
@@ -23,15 +24,28 @@ services:
       dockerfile: Dockerfile
     container_name: ingestor
     depends_on:
-      - broker
-      - database
+    - broker
+    - database
+    networks:
+      - backend
 
   api:
-    build: ./api
-    container_name: measurements-api
+    build:
+      context: ./api
+      dockerfile: Dockerfile
     ports:
-      - "5001:5001"
+      - "5001:5000"
+    environment:
+      - API_USERNAME=student
+      - API_PASSWORD=student
+
+    container_name: api
     depends_on:
       - database
+    networks:
+      - backend
 
 
+networks:
+  backend:
+    driver: bridge

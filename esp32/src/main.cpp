@@ -1,121 +1,73 @@
 #include <Arduino.h>
-#include <WiFi.h>
-#include <PubSubClient.h>
-#include <ArduinoJson.h>
-#include <time.h>       // Dodane dla NTP
-#include <sys/time.h>   // Dodane dla precyzyjnych ms
+#include "wifi_manager.h"
+#include "mqtt_manager.h"
+#include "time_sync.h"
 #include "secrets.h"
+#include "device.h" // Dodane dla generateDeviceIdFromNvs()
 
-// Deklaracje funkcji z pliku sensorism.cpp
-float getsimAzimuth();
+unsigned long lastMeasurementMs = 0;
+const unsigned long MEASUREMENT_INTERVAL_MS = 5000;
+unsigned int seqNumber = 0; // <-- DODANE: Globalny licznik pomiarów
 
+void setup()
+{
+  Serial.begin(115200);
+  delay(1000);
 
-WiFiClient espClient;
-PubSubClient mqttClient(espClient);
-String deviceId;
+  // Pobranie unikalnego ID urządzenia i przypisanie do zmiennej globalnej
+  deviceId = generateDeviceIdFromNvs();
+  Serial.print("Device ID: ");
+  Serial.println(deviceId);
 
-String generateDeviceIdFromEfuse() {
-    uint64_t chipId = ESP.getEfuseMac();
-    char id[32];
-    snprintf(id, sizeof(id), "esp32-%04X%08X",
-             (uint16_t)(chipId >> 32),
-             (uint32_t)chipId);
-    return String(id);
+  mqttClient.setServer(MQTT_HOST, MQTT_PORT);
+
+  connectWiFi();
+  synchronizeTime(); 
 }
 
-void connectWiFi() {
-    Serial.print("Laczenie z Wi-Fi: ");
-    Serial.println(WIFI_SSID);
-    WiFi.mode(WIFI_STA);
-    WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-    while (WiFi.status() != WL_CONNECTED) {
-        delay(500);
-        Serial.print(".");
+void loop()
+{
+  // 1. Zabezpieczenie połączeń (nieblokujące)
+  connectWiFiIfNeeded();
+  connectMqttIfNeeded(); // <-- Tu wykonuje się nasz nowy kod z instrukcji (z Last Will!)
+  mqttClient.loop();
+
+  // 2. Cykliczne wysyłanie pomiarów
+  if (millis() - lastMeasurementMs >= MEASUREMENT_INTERVAL_MS)
+  {
+    lastMeasurementMs = millis();
+
+    if (isWiFiConnected() && mqttClient.connected())
+    {
+      long long time = 0;
+      if (isTimeSynchronized())
+      {
+        time = getTimestampMs();
+      }
+
+      float tempC = temperatureRead();
+      seqNumber++; // <-- DODANE: Zwiększamy licznik o 1 przy każdym nowym pomiarze
+      
+      // Ręczne budowanie topicu i JSONa z pomiarem
+      String topic = "lab/" + String(MQTT_GROUP) + "/" + deviceId + "/temperature";
+      
+      // <-- ZAKTUALIZOWANE: Pełny, bogaty JSON z group_id, unit i seq
+      String payload = "{\"device_id\":\"" + deviceId + "\","
+                       "\"type\":\"meas\","
+                       "\"sensor\":\"temperature\","
+                       "\"value\":" + String(tempC) + ","
+                       "\"unit\":\"C\","
+                       "\"group_id\":\"" + String(MQTT_GROUP) + "\","
+                       "\"seq\":" + String(seqNumber) + ","
+                       "\"ts_ms\":" + String(time) + "}";
+      
+      // Wysyłamy przez standardową funkcję biblioteki
+      mqttClient.publish(topic.c_str(), payload.c_str());
+      
+      Serial.print("Wyslano pomiar (seq: ");
+      Serial.print(seqNumber);
+      Serial.print("): ");
+      Serial.println(tempC);
     }
-    Serial.println("\nPolaczono z Wi-Fi");
-    Serial.print("Adres IP: ");
-    Serial.println(WiFi.localIP());
-
-    // --- Synchronizacja czasu NTP ---
-    configTime(0, 0, "pool.ntp.org", "time.nist.gov");
-    struct tm timeinfo;
-    Serial.print("Oczekiwanie na synchronizacje czasu...");
-    while (!getLocalTime(&timeinfo)) {
-        Serial.print(".");
-        delay(500);
-    }
-    Serial.println("\nCzas zsynchronizowany.");
-}
-
-void connectMQTT() {
-    mqttClient.setServer(MQTT_HOST, MQTT_PORT);
-    while (!mqttClient.connected()) {
-        Serial.print("Laczenie z MQTT...");
-        if (mqttClient.connect(deviceId.c_str())) {
-            Serial.println("OK");
-        } else {
-            Serial.print("blad, rc=");
-            Serial.print(mqttClient.state());
-            Serial.println(" - ponowna proba za 2 s");
-            delay(2000);
-        }
-    }
-}
-
-// Funkcja pobierająca aktualny czas Unix w milisekundach
-long long getTimestampMs() {
-    struct timeval tv;
-    gettimeofday(&tv, NULL);
-    return ((long long)tv.tv_sec * 1000LL) + (tv.tv_usec / 1000);
-}
-
-// Ulepszona funkcja publikująca
-void publishMeasurement(String sensorName, float value, String unit) {
-    StaticJsonDocument<256> doc;
-    doc["device_id"] = deviceId;
-    doc["sensor"] = sensorName;   
-    doc["value"] = value;         
-    doc["unit"] = unit;
-    
-    // ZMIANA: używamy prawdziwego czasu Unix zamiast millis()
-    doc["ts_ms"] = getTimestampMs();
-
-    char payload[256];
-    serializeJson(doc, payload);
-
-    String currentTopic = "lab/" + String(MQTT_GROUP) + "/" + deviceId + "/" + sensorName;
-
-    mqttClient.publish(currentTopic.c_str(), payload);
-    Serial.print("Publikacja na topic: ");
-    Serial.println(currentTopic);
-    Serial.println(payload);
-}
-
-void setup() {
-    Serial.begin(115200);
-    delay(1000);
-    deviceId = generateDeviceIdFromEfuse();
-    
-    Serial.print("Device ID: ");
-    Serial.println(deviceId);
-    
-    connectWiFi();
-    connectMQTT();
-}
-
-void loop() {
-    if (WiFi.status() != WL_CONNECTED) {
-        connectWiFi();
-    }
-    if (!mqttClient.connected()) {
-        connectMQTT();
-    }
-    mqttClient.loop();
-
-    // Wrzucamy urozmaicenie! Wysyłamy kolejno 3 wiadomości:
-    publishMeasurement("temperature", temperatureRead(), "C");             
-    publishMeasurement("azimuth", getsimAzimuth(), "deg");    
-       
-
-    delay(5000);
+  }
 }
