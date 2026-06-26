@@ -52,11 +52,11 @@ A data access gateway built with the Flask framework.
 
 * Exposes optimized endpoints:
 
-** /health – Service health check and diagnostics.
+    * /health – Service health check and diagnostics.
 
-** /measurements/latest – Retrieves the most recent sensor reading.
+    * /measurements/latest – Retrieves the most recent sensor reading.
 
-** /measurements/history – Retrieves historical data with full Query Params support (filtering by limits, specific devices, and sensors).
+    * /measurements/history – Retrieves historical data with full Query Params support (filtering by limits, specific devices, and sensors).
 
 * Handles the mapping of SQL query results to normalized JSON objects.
 4. User Interface (Streamlit Dashboard)
